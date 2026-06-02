@@ -1,0 +1,12 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: servicio-itinerario-viajes-kevin-inofuente
+spec:
+  template:
+    spec:
+      containers:
+        - image: us-central1-docker.pkg.dev/mlops-14-project-deploy-fast/repo-crewai-streamlit-frontend/imagen-v3-crewai-streamlit-frontend:latest
+          env:
+          ports:
+            - containerPort: 4000
