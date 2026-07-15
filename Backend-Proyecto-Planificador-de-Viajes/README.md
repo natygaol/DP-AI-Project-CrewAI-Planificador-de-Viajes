@@ -1,54 +1,87 @@
-# TravelCrewBackend Crew
+# Backend — Planificador de Viajes IA (CrewAI + FastAPI)
 
-Welcome to the TravelCrewBackend Crew project, powered by [crewAI](https://crewai.com). This template is designed to help you set up a multi-agent AI system with ease, leveraging the powerful and flexible framework provided by crewAI. Our goal is to enable your agents to collaborate effectively on complex tasks, maximizing their collective intelligence and capabilities.
+Backend del planificador de viajes conversacional. Expone una **API FastAPI** que
+ejecuta un **crew de 6 agentes de CrewAI** para investigar un destino y generar un
+itinerario personalizado día por día, agendándolo además en Google Calendar.
 
-## Installation
+## Requisitos
 
-Ensure you have Python >=3.10 <3.13 installed on your system. This project uses [UV](https://docs.astral.sh/uv/) for dependency management and package handling, offering a seamless setup and execution experience.
+- Python 3.10–3.12
+- [uv](https://docs.astral.sh/uv/) para gestionar dependencias
+- Claves en el archivo `.env` (ver `.env.example`):
+  - `OPENAI_API_KEY` — modelo LLM.
+  - `TAVILY_API_KEY` — búsqueda en internet de los agentes ([gratis en tavily.com](https://tavily.com)).
+  - `CREWAI_PLATFORM_INTEGRATION_TOKEN` — integración de Google Calendar (Settings → Integrations en app.crewai.com).
 
-First, if you haven't already, install uv:
-
-```bash
-pip install uv
-```
-
-Next, navigate to your project directory and install the dependencies:
-
-(Optional) Lock the dependencies and install them by using the CLI command:
-```bash
-crewai install
-```
-### Customizing
-
-**Add your `OPENAI_API_KEY` into the `.env` file**
-
-- Modify `src/travel_crew_backend/config/agents.yaml` to define your agents
-- Modify `src/travel_crew_backend/config/tasks.yaml` to define your tasks
-- Modify `src/travel_crew_backend/crew.py` to add your own logic, tools and specific args
-- Modify `src/travel_crew_backend/main.py` to add custom inputs for your agents and tasks
-
-## Running the Project
-
-To kickstart your crew of AI agents and begin task execution, run this from the root folder of your project:
+## Puesta en marcha
 
 ```bash
-$ crewai run
+cp .env.example .env      # rellena tus claves
+uv sync                   # crea el .venv e instala dependencias
+uv run uvicorn backend_proyecto_planificador_de_viajes.main:app \
+  --app-dir src --host 127.0.0.1 --port 8005 --reload
 ```
 
-This command initializes the travel_crew_backend Crew, assembling the agents and assigning them tasks as defined in your configuration.
+El servidor queda en `http://localhost:8005`.
 
-This example, unmodified, will run the create a `report.md` file with the output of a research on LLMs in the root folder.
+## API
 
-## Understanding Your Crew
+| Método | Ruta          | Descripción |
+|--------|---------------|-------------|
+| `GET`  | `/`           | Healthcheck. |
+| `POST` | `/plan-trip`  | Recibe `{ "prompt": "..." }` y devuelve el itinerario. |
 
-The travel_crew_backend Crew is composed of multiple AI agents, each with unique roles, goals, and tools. These agents collaborate on a series of tasks, defined in `config/tasks.yaml`, leveraging their collective skills to achieve complex objectives. The `config/agents.yaml` file outlines the capabilities and configurations of each agent in your crew.
+Respuesta de `/plan-trip`:
 
-## Support
+```json
+{
+  "chat_response": "…itinerario en markdown…",
+  "download_content": "…documento completo en markdown…",
+  "download_filename": "itinerary.md"
+}
+```
 
-For support, questions, or feedback regarding the TravelCrewBackend Crew or crewAI.
-- Visit our [documentation](https://docs.crewai.com)
-- Reach out to us through our [GitHub repository](https://github.com/joaomdmoura/crewai)
-- [Join our Discord](https://discord.com/invite/X4JWnZnxPb)
-- [Chat with our docs](https://chatg.pt/DWjSBZn)
+## El crew (6 agentes, proceso secuencial)
 
-Let's create wonders together with the power and simplicity of crewAI.
+Definido en `src/backend_proyecto_planificador_de_viajes/crew.py`, con los roles y
+tareas en `config/agents.yaml` y `config/tasks.yaml`.
+
+| # | Agente | Herramienta | Función |
+|---|--------|-------------|---------|
+| 1 | Experto cultural | Búsqueda (Tavily) | Atracciones, museos, sitios históricos. |
+| 2 | Gourmet local | Búsqueda (Tavily) | Restaurantes y gastronomía típica. |
+| 3 | Logística | Búsqueda (Tavily) | Vuelos, hoteles, transporte, presupuesto. |
+| 4 | Planificador de itinerario | — | Organiza todo en un plan día por día. |
+| 5 | Gestor de agenda | Google Calendar | Crea un evento por cada día del viaje. |
+| 6 | Redactor de viajes | — | Escribe el documento final (`itinerary.md`). |
+
+Flujo: `cultura → gastronomía → logística → itinerario → agenda → redacción`.
+
+## Herramientas de búsqueda
+
+- **`tools/busqueda_internet_tool.py`** — herramienta **activa**, basada en **Tavily**
+  (mejor para agentes de IA: contenido extraído + respuesta sintetizada).
+- **`tools/custom_tool.py`** — alternativa con **DuckDuckGo** (`ddgs`), gratis y sin
+  API key. Para volver a ella, edita el import y `self.search_tool` en `crew.py`.
+
+## Estructura
+
+```
+src/backend_proyecto_planificador_de_viajes/
+├── main.py                  # API FastAPI (endpoint /plan-trip)
+├── crew.py                  # Definición del crew (agentes + tareas)
+├── config/
+│   ├── agents.yaml          # Roles, objetivos y backstories
+│   └── tasks.yaml           # Descripciones y outputs esperados
+└── tools/
+    ├── busqueda_internet_tool.py   # Búsqueda con Tavily (activa)
+    └── custom_tool.py              # Búsqueda con DuckDuckGo (alternativa)
+```
+
+## Notas
+
+- El endpoint usa `kickoff_async` (requerido dentro del event loop de FastAPI).
+- El tracing interactivo de CrewAI está desactivado (`tracing=False`) para que no
+  bloquee las requests en el servidor.
+- El itinerario final se guarda en `itinerary.md` (vía `output_file` de la tarea de
+  redacción) y se devuelve en `download_content`.
