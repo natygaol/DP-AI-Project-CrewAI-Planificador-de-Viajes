@@ -1,5 +1,0 @@
-steps:
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-f', 'Dockerfile.prod', '-t', 'us-central1-docker.pkg.dev/mlops-14-project-deploy-fast/repo-crewai-streamlit-frontend/imagen-v3-crewai-streamlit-frontend:latest', '.']
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'us-central1-docker.pkg.dev/mlops-14-project-deploy-fast/repo-crewai-streamlit-frontend/imagen-v3-crewai-streamlit-frontend:latest']

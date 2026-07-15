@@ -1,6 +1,14 @@
-# Activamos el Entorno Virtual para el Frontend
-conda activate CrewAI-PlanificadorViajes-Front
-streamlit run app.py
+# ================================================================
+# Frontend con React + Vite
+- Runtime: Node.js v26
+# 1. Entrar a la carpeta del frontend
+cd "Frontend-Proyecto-Planificador-de-Viajes"
+# 2. Instalar dependencias (SOLO la primera vez, o si cambia package.json)
+npm install
+# 3. Levantar el servidor de desarrollo
+npm run dev
+
+Luego abre http://localhost:5173 en el navegador.
 
 # ================================================================
 

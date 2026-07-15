@@ -13,8 +13,12 @@ from dotenv import load_dotenv
 # Importar componentes principales de CrewAI
 from crewai import Agent, Crew, Process, Task
 from crewai.project import CrewBase, agent, crew, task  # Decoradores para organizar el código
-from .tools.custom_tool import InternetSearchTool  # Nuestra herramienta de búsqueda
-
+# Herramienta de búsqueda en internet. Usamos Tavily (mejor para agentes de IA).
+# La versión con DuckDuckGo sigue disponible en tools/custom_tool.py como alternativa:
+#   from .tools.custom_tool import InternetSearchTool
+from .tools.busqueda_internet_tool import TavilyInternetSearchTool
+import agentops
+agentops.init()
 
 # DECORADOR @CrewBase: Indica que esta clase define un Crew
 @CrewBase
@@ -30,8 +34,8 @@ class TravelCrew():
 	def __init__(self) -> None:
 		load_dotenv()  # Cargar variables de entorno (.env)
 
-		# Inicializar la herramienta de búsqueda que usarán los agentes
-		self.search_tool = InternetSearchTool()
+		# Inicializar la herramienta de búsqueda que usarán los agentes (Tavily)
+		self.search_tool = TavilyInternetSearchTool()
 
 	# ========================================================================
 	# DEFINICIÓN DE AGENTES
