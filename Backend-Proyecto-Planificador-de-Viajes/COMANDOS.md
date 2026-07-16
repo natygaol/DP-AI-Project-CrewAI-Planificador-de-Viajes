@@ -29,3 +29,10 @@ docker buildx build \
   -t kevininofuentecolque/app-crewai-conversacional-backend-ai-engineer-13:latest \
   --push \
   .
+
+
+
+
+cd "Backend-Proyecto-Planificador-de-Viajes-Hierarchical"
+uv sync    # crea su PROPIO .venv (obligatorio la primera vez)
+uv run uvicorn backend_proyecto_planificador_de_viajes.main:app --app-dir src --host 127.0.0.1 --port 8005 --reload
