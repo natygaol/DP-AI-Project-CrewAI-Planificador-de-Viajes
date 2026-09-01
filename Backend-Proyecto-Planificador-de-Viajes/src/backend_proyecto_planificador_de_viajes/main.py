@@ -1,80 +1,172 @@
-# src/travel_crew_backend/main.py
+"""
+API del Asistente de Viajes: capa conversacional (LangChain) + crew (CrewAI).
+
+Dos endpoints con proposito distinto:
+
+- POST /chat       El agente conversacional. Dialoga, reune el brief del viaje y,
+                   cuando lo tiene completo, invoca el crew a traves de una tool.
+                   El turno tarda segundos... salvo el turno que lanza el crew,
+                   que tarda minutos. Es el camino que usa el frontend.
+
+- POST /plan-trip  Dispara el crew directamente con un prompt, sin conversacion.
+                   Se mantiene por compatibilidad y para probar el crew aislado.
+
+Arrancar:
+    uv run uvicorn backend_proyecto_planificador_de_viajes.main:app \
+        --app-dir src --host 127.0.0.1 --port 8005 --reload
+"""
+
+import os
+from contextlib import asynccontextmanager
+from datetime import date
 
 from fastapi import FastAPI
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
-from datetime import date
-import os
 
-# Usamos una importación relativa porque 'crew.py' está en el mismo directorio.
+from .conversational_agent import cerrar_memoria, init_resources, responder
+from .conversational_agent.tools import limpiar_salida_llm
 from .crew import TravelCrew
 
-# Inicializar la aplicación FastAPI
+ARCHIVO_ITINERARIO = "itinerary.md"
+
+# Se pone a False si el agente conversacional no pudo arrancar (falta
+# DATABASE_URL, por ejemplo). /plan-trip sigue funcionando igual.
+_chat_disponible = False
+_chat_error = ""
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Inicializa el agente conversacional al arrancar y lo cierra al apagar.
+
+    Un fallo aqui NO tumba la app: /plan-trip no depende del agente, y es mejor
+    servirlo que dejar el backend entero caido por una variable de entorno.
+    """
+    global _chat_disponible, _chat_error
+    try:
+        await init_resources()
+        _chat_disponible = True
+    except Exception as e:
+        _chat_error = str(e)
+        print(f"⚠️  Agente conversacional NO disponible: {e}")
+        print("   /plan-trip sigue operativo. /chat devolvera 503.")
+
+    yield
+
+    await cerrar_memoria()
+
+
 app = FastAPI(
     title="API del Asistente de Viajes",
-    description="Una API para planificar itinerarios de viaje personalizados usando un equipo de agentes de IA (CrewAI).",
-    version="1.0.0"
+    description=(
+        "Agente conversacional (LangChain) que dialoga con el usuario y delega "
+        "en un equipo de agentes (CrewAI) cuando toca generar el itinerario."
+    ),
+    version="2.0.0",
+    lifespan=lifespan,
 )
+
 
 class TripRequest(BaseModel):
     prompt: str
 
-# --- Función de Limpieza ---
-# Esta función eliminará los artefactos comunes del LLM
-def clean_llm_output(text: str) -> str:
-    cleaned_text = text.replace("∗", "").replace("ˊ", "")
-    # Puedes añadir más reemplazos si encuentras otros artefactos
-    return cleaned_text
 
-@app.post("/plan-trip") #Primer Endpoint.
-async def plan_trip_endpoint(request: TripRequest):
+class ChatRequest(BaseModel):
+    message: str
+    # Identidad del hilo: mismo valor = misma memoria. Lo genera el frontend y
+    # lo mantiene mientras dure la conversacion.
+    thread_id: str
+
+
+@app.post("/chat")
+async def chat_endpoint(request: ChatRequest):
+    """Un turno de conversacion.
+
+    Devuelve siempre `reply`. Devuelve ademas `itinerary` solo en el turno en que
+    el agente decidio lanzar el crew: ese campo trae el markdown REAL del crew,
+    no la version que redactaria el LLM, para que el frontend lo pinte en sus
+    tarjetas por dia.
     """
-    Recibe una petición de viaje y devuelve un itinerario generado por el Crew de IA,
-    listo para mostrarse en el chat y para ser descargado.
-    """
-    try:
-        inputs = {
-            'trip_request': request.prompt,
-            # Fecha de hoy: el agente de agenda la usa para resolver fechas relativas
-            'fecha_actual': date.today().isoformat(),
-        }
-        
-        print(f"🚀 Ejecutando el crew para la petición: {request.prompt}")
-        travel_crew = TravelCrew()
-        # crewai 1.14+: dentro de un endpoint async hay que usar kickoff_async,
-        # no kickoff (síncrono), o lanza "invoked synchronously from within a running event loop".
-        result = await travel_crew.crew().kickoff_async(inputs=inputs)
-        print(f"✅ Crew finalizado. Procesando resultado.")
-
-        # 1. Obtener el resultado final y limpiarlo para el chat
-        final_chat_response = clean_llm_output(result.raw)
-
-        # 2. Leer el contenido del archivo .md para la descarga
-        download_content = ""
-        filename = "itinerary.md"
-        try:
-            with open(filename, 'r', encoding='utf-8') as f:
-                download_content = f.read()
-        except FileNotFoundError:
-            print(f"⚠️  Advertencia: No se encontró el archivo '{filename}'. La descarga no estará disponible.")
-            download_content = final_chat_response # Como fallback, usamos la respuesta del chat
-
-        # 3. Construir la respuesta JSON estructurada
-        structured_response = {
-            "chat_response": final_chat_response,
-            "download_content": download_content,
-            "download_filename": filename
-        }
-        
-        return structured_response
-
-    except Exception as e:
-        print(f"❌ Error durante la ejecución del crew: {e}")
+    if not _chat_disponible:
         return JSONResponse(
-            status_code=500,
-            content={"message": "Ocurrió un error interno al procesar tu solicitud.", "details": str(e)}
+            status_code=503,
+            content={
+                "message": "El agente conversacional no esta disponible.",
+                "details": _chat_error,
+            },
         )
 
-@app.get("/") #Segundo Endpoint.
+    try:
+        resultado = await responder(request.thread_id, request.message)
+    except Exception as e:
+        print(f"❌ Error en el turno de chat: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "message": "Ocurrio un error procesando tu mensaje.",
+                "details": str(e),
+            },
+        )
+
+    respuesta = {"reply": resultado["reply"], "itinerary": None}
+
+    if "itinerario" in resultado:
+        respuesta["itinerary"] = {
+            "chat_response": resultado["itinerario"],
+            "download_content": resultado["descarga"],
+            "download_filename": ARCHIVO_ITINERARIO,
+        }
+
+    return respuesta
+
+
+@app.post("/plan-trip")
+async def plan_trip_endpoint(request: TripRequest):
+    """Ejecuta el crew directamente, sin pasar por la conversacion."""
+    try:
+        inputs = {
+            "trip_request": request.prompt,
+            # Fecha de hoy: el agente de agenda la usa para fechas relativas.
+            "fecha_actual": date.today().isoformat(),
+        }
+
+        print(f"🚀 Ejecutando el crew para la peticion: {request.prompt}")
+        travel_crew = TravelCrew()
+        # crewai 1.14+: dentro de un endpoint async hay que usar kickoff_async,
+        # no kickoff, o lanza "invoked synchronously from within a running event loop".
+        result = await travel_crew.crew().kickoff_async(inputs=inputs)
+        print("✅ Crew finalizado. Procesando resultado.")
+
+        final_chat_response = limpiar_salida_llm(result.raw)
+
+        try:
+            with open(ARCHIVO_ITINERARIO, encoding="utf-8") as f:
+                download_content = f.read()
+        except FileNotFoundError:
+            print(f"⚠️  No se encontro '{ARCHIVO_ITINERARIO}'. Uso la respuesta del chat.")
+            download_content = final_chat_response
+
+        return {
+            "chat_response": final_chat_response,
+            "download_content": download_content,
+            "download_filename": ARCHIVO_ITINERARIO,
+        }
+
+    except Exception as e:
+        print(f"❌ Error durante la ejecucion del crew: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "message": "Ocurrio un error interno al procesar tu solicitud.",
+                "details": str(e),
+            },
+        )
+
+
+@app.get("/")
 def read_root():
-    return {"status": "El servidor del Asistente de Viajes IA está funcionando."}
+    return {
+        "status": "El servidor del Asistente de Viajes IA esta funcionando.",
+        "chat_disponible": _chat_disponible,
+    }

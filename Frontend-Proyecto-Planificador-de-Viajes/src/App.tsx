@@ -5,13 +5,19 @@ import TripFilters from "./components/TripFilters";
 import ChatInput from "./components/ChatInput";
 import ChatMessageView from "./components/ChatMessageView";
 import AgentProgress from "./components/AgentProgress";
+import TypingIndicator from "./components/TypingIndicator";
 import DestImage from "./components/DestImage";
-import { planTrip } from "./lib/api";
+import { chat } from "./lib/api";
 import { destinationImage } from "./lib/images";
 import { EMPTY_FILTERS, composePrompt } from "./types";
 import type { ChatMessage, TripFilters as Filters } from "./types";
 
 const USER_NAME = "Kevin";
+
+// Segundos de espera a partir de los cuales asumimos que el agente lanzó el
+// crew y cambiamos el indicador de "escribiendo" a la línea de tiempo. Un turno
+// conversacional normal responde muy por debajo de esto.
+const SEGUNDOS_HASTA_CREW = 6;
 
 // Tarjetas de inspiración de la pantalla de bienvenida
 const INSPIRATION: { title: string; query: string; prompt: string }[] = [
@@ -43,10 +49,19 @@ const INSPIRATION: { title: string; query: string; prompt: string }[] = [
 let idCounter = 0;
 const nextId = () => `${Date.now()}-${idCounter++}`;
 
+// Identidad del hilo de conversación. El backend la usa como thread_id del
+// checkpointer, así que mientras no cambie, el agente recuerda todo el hilo.
+const nuevoThreadId = () =>
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `thread-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
 export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
+  const [esperaLarga, setEsperaLarga] = useState(false);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [threadId, setThreadId] = useState(nuevoThreadId);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const hasConversation = messages.length > 0;
@@ -62,10 +77,23 @@ export default function App() {
     });
   }, [messages, loading]);
 
+  // Si el turno se alarga, es que el crew está corriendo: pasamos de los
+  // puntitos a la línea de tiempo de los agentes.
+  useEffect(() => {
+    if (!loading) {
+      setEsperaLarga(false);
+      return;
+    }
+    const t = setTimeout(() => setEsperaLarga(true), SEGUNDOS_HASTA_CREW * 1000);
+    return () => clearTimeout(t);
+  }, [loading]);
+
   const resetChat = () => {
     if (loading) return;
     setMessages([]);
     setFilters(EMPTY_FILTERS);
+    // Hilo nuevo = memoria nueva en el backend.
+    setThreadId(nuevoThreadId());
   };
 
   const handleSend = async (freeText: string) => {
@@ -82,29 +110,49 @@ export default function App() {
     setLoading(true);
 
     try {
-      const res = await planTrip(prompt);
-      const assistantMsg: ChatMessage = {
-        id: nextId(),
-        role: "assistant",
-        content:
-          res.chat_response ||
-          "Lo siento, no pude generar una respuesta esta vez.",
-        downloadContent: res.download_content,
-        downloadFilename: res.download_filename,
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
+      const res = await chat(prompt, threadId);
+
+      const nuevos: ChatMessage[] = [
+        {
+          id: nextId(),
+          role: "assistant",
+          content:
+            res.reply || "Lo siento, no pude generar una respuesta esta vez.",
+        },
+      ];
+
+      // El itinerario va como mensaje aparte: ChatMessageView lo detecta por el
+      // markdown y lo pinta en tarjetas por día en vez de como burbuja.
+      if (res.itinerary) {
+        nuevos.push({
+          id: nextId(),
+          role: "assistant",
+          content: res.itinerary.chat_response,
+          downloadContent: res.itinerary.download_content,
+          downloadFilename: res.itinerary.download_filename,
+        });
+      }
+
+      setMessages((prev) => [...prev, ...nuevos]);
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
       const isAbort = detail.toLowerCase().includes("abort");
-      const errorMsg: ChatMessage = {
-        id: nextId(),
-        role: "assistant",
-        isError: true,
-        content: isAbort
-          ? "**La solicitud tardó demasiado y se canceló.** El equipo de agentes puede tardar varios minutos; intenta de nuevo o simplifica tu petición."
-          : `**No pude comunicarme con el equipo de expertos.**\n\nVerifica que el backend esté corriendo en \`http://localhost:8005\`.\n\n*Detalle: ${detail}*`,
-      };
-      setMessages((prev) => [...prev, errorMsg]);
+      const sinAgente = detail.includes("503") || detail.includes("Postgres");
+
+      let content: string;
+      if (isAbort) {
+        content =
+          "**La solicitud tardó demasiado y se canceló.** El equipo de agentes puede tardar varios minutos; intenta de nuevo o simplifica tu petición.";
+      } else if (sinAgente) {
+        content = `**El agente conversacional no está disponible.**\n\nRevisa las variables \`DB_*\` en el \`.env\` del backend y que las migraciones de \`conversational_agent/migraciones_SQL/\` estén aplicadas.\n\n*Detalle: ${detail}*`;
+      } else {
+        content = `**No pude comunicarme con el asistente.**\n\nVerifica que el backend esté corriendo en \`http://localhost:8005\`.\n\n*Detalle: ${detail}*`;
+      }
+
+      setMessages((prev) => [
+        ...prev,
+        { id: nextId(), role: "assistant", isError: true, content },
+      ]);
     } finally {
       setLoading(false);
     }
@@ -139,9 +187,9 @@ export default function App() {
                   ¿Adónde vamos hoy, {USER_NAME}?
                 </h2>
                 <p className="mx-auto mt-2 max-w-md text-sm text-slate-500">
-                  Cuéntame tu viaje ideal —o usa los filtros de arriba— y mi
-                  equipo de agentes de IA armará un itinerario personalizado,
-                  día por día.
+                  Cuéntame la idea, aunque esté a medias. Vamos conversando los
+                  detalles y, cuando el plan esté claro, mi equipo arma el
+                  itinerario día por día.
                 </p>
 
                 <div className="mt-8 grid grid-cols-2 gap-3 text-left sm:grid-cols-4">
@@ -183,7 +231,7 @@ export default function App() {
                       <Compass className="h-4 w-4" />
                     </div>
                     <div className="min-w-0 flex-1">
-                      <AgentProgress />
+                      {esperaLarga ? <AgentProgress /> : <TypingIndicator />}
                     </div>
                   </div>
                 )}

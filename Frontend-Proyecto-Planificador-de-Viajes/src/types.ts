@@ -30,8 +30,9 @@ export function composePrompt(freeText: string, f: TripFilters): string {
 
   if (extras.length) {
     parts.push(
-      (text ? "\n\nDetalles adicionales:\n- " : "Planifica un viaje.\n- ") +
-        extras.join("\n- ")
+      (text ? "\n\n(Datos que ya elegí: " : "Quiero planificar un viaje. ") +
+        extras.join(", ") +
+        (text ? ")" : ".")
     );
   }
   return parts.join("");
@@ -42,6 +43,19 @@ export interface PlanTripResponse {
   chat_response: string;
   download_content?: string | null;
   download_filename?: string | null;
+}
+
+/**
+ * Respuesta del backend (endpoint /chat).
+ *
+ * `reply` es lo que dice el agente conversacional y viene siempre.
+ * `itinerary` solo llega en el turno en que el agente lanzó el crew, y trae el
+ * markdown real del crew — no la versión reescrita por el LLM — para que se
+ * pinte en tarjetas por día.
+ */
+export interface ChatResponse {
+  reply: string;
+  itinerary?: PlanTripResponse | null;
 }
 
 export type Role = "user" | "assistant";
