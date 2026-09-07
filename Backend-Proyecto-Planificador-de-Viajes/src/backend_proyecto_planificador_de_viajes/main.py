@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 from datetime import date
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
@@ -65,6 +66,22 @@ app = FastAPI(
     ),
     version="2.0.0",
     lifespan=lifespan,
+)
+
+# CORS. El frontend (Vercel) y el backend (Cloud Run) viven en dominios
+# distintos, así que el navegador exige que el backend autorice el origen.
+# CORS_ALLOW_ORIGINS es una lista separada por comas
+# (p. ej. "https://mi-front.vercel.app,http://localhost:5173").
+# Sin la variable => "*", cómodo en local y para probar el primer deploy.
+_cors_origins = [
+    o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "*").split(",") if o.strip()
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_cors_origins,
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

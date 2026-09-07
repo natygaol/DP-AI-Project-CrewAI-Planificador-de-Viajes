@@ -1,0 +1,15 @@
+# No copiar entorno local, secretos ni basura al contexto de build.
+.venv/
+**/__pycache__/
+*.pyc
+.env
+.env.*
+!.env.example
+.git/
+.gitignore
+*.log
+agentops.log
+itinerary.md
+.pytest_cache/
+.ruff_cache/
+node_modules/
