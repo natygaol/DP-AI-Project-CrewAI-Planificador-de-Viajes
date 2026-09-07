@@ -1,0 +1,16 @@
+# Qué NO subir al contexto de build de Cloud Build.
+# (Si este archivo existe, gcloud lo usa en vez de .gitignore.)
+.git/
+.gitignore
+.venv/
+**/__pycache__/
+*.pyc
+*.log
+agentops.log
+itinerary.md
+.pytest_cache/
+.ruff_cache/
+node_modules/
+.env
+.env.*
+!.env.example
