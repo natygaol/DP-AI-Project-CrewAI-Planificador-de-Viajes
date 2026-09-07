@@ -15,3 +15,6 @@ venv/
 
 # ===== Logs / temporales =====
 *.log
+
+# ===== Config local de Claude Code (no compartir) =====
+.claude/settings.local.json

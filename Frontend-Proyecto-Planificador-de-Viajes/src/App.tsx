@@ -12,7 +12,7 @@ import { destinationImage } from "./lib/images";
 import { EMPTY_FILTERS, composePrompt } from "./types";
 import type { ChatMessage, TripFilters as Filters } from "./types";
 
-const USER_NAME = "Kevin";
+const USER_NAME = "Naty";
 
 // Segundos de espera a partir de los cuales asumimos que el agente lanzó el
 // crew y cambiamos el indicador de "escribiendo" a la línea de tiempo. Un turno

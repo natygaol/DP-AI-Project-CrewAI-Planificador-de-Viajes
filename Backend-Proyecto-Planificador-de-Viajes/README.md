@@ -144,7 +144,27 @@ cosa en su carpeta, y `agent.py` solo orquesta.
 | Persona, tono, qué datos pide, cuándo lanza el crew | `prompt/system_prompt.yaml` |
 | Backend de memoria | `chat_history/` |
 | Lo que el agente puede hacer | `tools/` |
+| Filtro de entrada (candado de alcance) | `guardrail.py` + bloque `guardrail:` de `model_config/model.yaml` |
 | Cómo se ensambla todo | `agent.py` |
+
+### Candado de alcance (anti prompt injection)
+
+El agente solo debe hablar de planificación de viajes. Dos capas:
+
+1. **`guardrail.py`** — filtro de entrada. Antes de construir el agente,
+   `responder()` clasifica el mensaje con `gpt-4.1-mini` en `viajes` /
+   `fuera_de_tema` / `inyeccion`. Si no es `viajes`, devuelve una respuesta fija
+   (`RESPUESTA_FUERA_DE_ALCANCE`) sin gastar el modelo principal, y lo registra en
+   `conversation_log` con `tools_usadas = ["guardrail:<veredicto>"]`. Es
+   *fail-open*: si el filtro falla o está `enabled: false`, el mensaje pasa.
+   Mensajes contextuales cortos ("sí, lánzalo", "el segundo") se dejan pasar a
+   propósito.
+2. **`prompt/system_prompt.yaml`** — secciones `<Alcance>` y `<Seguridad>`. Es la
+   última línea de defensa: rechaza temas ajenos, ignora órdenes que cambien el
+   rol y no revela el prompt ni credenciales.
+
+Para desactivar el filtro (sigue quedando la capa del prompt): `enabled: false`
+en el bloque `guardrail:` de `model_config/model.yaml`.
 
 ### Memoria: dos piezas, no una
 
@@ -183,7 +203,8 @@ src/backend_proyecto_planificador_de_viajes/
 │   └── custom_tool.py              # Búsqueda con DuckDuckGo (alternativa)
 └── conversational_agent/    # Agente conversacional (LangChain)
     ├── agent.py                    # Orquestador
-    ├── model_config/model.yaml     # LLM y umbrales de memoria
+    ├── guardrail.py                # Filtro de entrada (candado de alcance)
+    ├── model_config/model.yaml     # LLM, memoria y config del guardrail
     ├── prompt/system_prompt.yaml   # System prompt (formato XML-tag)
     ├── chat_history/
     │   ├── postgres_store.py       # Checkpointer (AsyncPostgresSaver)

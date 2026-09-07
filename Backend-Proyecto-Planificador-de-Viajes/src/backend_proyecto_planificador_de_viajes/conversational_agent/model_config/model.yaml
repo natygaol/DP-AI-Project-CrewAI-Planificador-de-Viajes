@@ -13,6 +13,17 @@ llm:
   # El crew tarda minutos, pero el turno conversacional debe ser rapido.
   timeout: 60
 
+guardrail:
+  # Filtro de entrada: clasifica cada mensaje ANTES de que llegue al agente y
+  # descarta lo que no sea planificacion de viajes y los intentos de prompt
+  # injection. Ponlo en false para desactivarlo (el system prompt sigue siendo
+  # la ultima linea de defensa).
+  enabled: true
+  # Modelo barato: la tarea es clasificar en una palabra, no razonar.
+  model: gpt-4.1-mini
+  # Corto a proposito: el filtro debe anadir decimas de segundo, no segundos.
+  timeout: 15
+
 memory:
   # Umbral de tokens que dispara el resumen del historial.
   token_limit: 3000

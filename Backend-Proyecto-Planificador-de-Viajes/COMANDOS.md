@@ -1,3 +1,6 @@
+#comando crewai
+crewai create crew "nombre_proyecto"
+
 # ================================================================
 # Frontend con React + Vite
 - Runtime: Node.js v26

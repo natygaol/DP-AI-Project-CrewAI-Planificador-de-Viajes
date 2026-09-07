@@ -28,6 +28,7 @@ from langchain_openai import ChatOpenAI
 
 from .agentops_compat import desactivar_wrapper_add_node
 from .chat_history import abrir_memoria, get_checkpointer, log_mensaje
+from .guardrail import clasificar_mensaje, init_guardrail
 
 # OJO al orden: importar .tools arrastra crew.py, que llama a agentops.init().
 # El parche de agentops_compat tiene que aplicarse DESPUES de eso, por eso se
@@ -43,6 +44,14 @@ RUTA_MODEL_CONFIG = DIRECTORIO / "model_config" / "model.yaml"
 RUTA_SYSTEM_PROMPT = DIRECTORIO / "prompt" / "system_prompt.yaml"
 
 NOMBRE_BOT = "Aria"
+
+# Respuesta fija cuando el guardrail de entrada corta un mensaje (fuera de tema o
+# intento de prompt injection). No pasa por el LLM: es texto plano y cierra el
+# turno sin gastar el modelo principal.
+RESPUESTA_FUERA_DE_ALCANCE = (
+    "Solo puedo ayudarte a planificar viajes: destinos, fechas, presupuesto e "
+    "itinerarios. Cuentame que viaje tienes en mente y lo vemos."
+)
 
 # El default de SummarizationMiddleware esta redactado para agentes de codigo
 # (pide secciones ARTIFACTS y rutas de archivos). En un agente de viajes produce
@@ -102,6 +111,10 @@ async def init_resources() -> None:
     llm_cfg = cfg["llm"]
     _config_memoria = cfg["memory"]
 
+    # Filtro de entrada: descarta lo ajeno a viajes y la prompt injection antes de
+    # llegar al agente. Si no hay bloque en el YAML, queda desactivado.
+    init_guardrail(cfg.get("guardrail", {}))
+
     _llm = ChatOpenAI(
         model=llm_cfg["model"],
         temperature=llm_cfg["temperature"],
@@ -155,6 +168,17 @@ async def responder(thread_id: str, mensaje: str) -> dict:
     # Registramos el mensaje entrante ANTES de invocar: si el turno falla, al
     # menos queda constancia de que pregunto el usuario.
     await log_mensaje(thread_id, "user", mensaje)
+
+    # Candado de alcance: si el mensaje no es sobre viajes o intenta manipular las
+    # reglas del asistente, se responde con texto fijo y NO se construye el agente
+    # (el modelo principal ni ve el mensaje).
+    veredicto = await clasificar_mensaje(mensaje)
+    if veredicto != "viajes":
+        print(f"🚫 Guardrail bloqueo un mensaje ({veredicto}).")
+        await log_mensaje(
+            thread_id, "assistant", RESPUESTA_FUERA_DE_ALCANCE, [f"guardrail:{veredicto}"]
+        )
+        return {"reply": RESPUESTA_FUERA_DE_ALCANCE}
 
     slot: dict = {}
     agente = build_agent(slot)
